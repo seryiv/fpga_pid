@@ -2,87 +2,122 @@
 
 namespace TestDataGenerator;
 
-public class Generator
+public sealed class Generator
 {
-    private const int FracBits = 20;
+    private readonly int _fracBits;
 
-    private const uint ControlBase = 0x0000_03E8;
-    private const uint ControlMin = 0x0000_0000;
-    private const uint ControlMax = 0xFFFF_FFFF;
+    private readonly uint _controlBase;
+    private readonly uint _controlMin;
+    private readonly uint _controlMax;
 
-    // Реальные коэффициенты.
-    // Ниже они будут преобразованы в fixed-point.
-    public double Kp { get; init; } //0.25
-    public double Ki { get; init; } //0.001
+    public double Kp { get; }
+    public double Ki { get; }
+    public double Kd { get; }
 
     private readonly long _kpFixed;
     private readonly long _kiFixed;
+    private readonly long _kdFixed;
 
-    // Аналог 80-битного integrator из Verilog.
-    // BigInteger позволяет не думать о переполнении C#.
-    private static BigInteger _integrator;
+    private BigInteger _integrator;
 
-    public Generator(double kp, double ki)
+    private long _previousError;
+    private bool _hasPreviousError;
+
+    public Generator(
+        double kp,
+        double ki,
+        double kd,
+        int fracBits = 20,
+        uint controlBase = 0x8000_0000,
+        uint controlMin = 0x0000_0000,
+        uint controlMax = 0xFFFF_FFFF)
     {
-        Kp = kp;
-        Ki = ki;
-        _kpFixed = ToFixed(Kp);
-        _kiFixed = ToFixed(Ki);
+        Kp = kp; Ki = ki; Kd = kd;
+
+        _fracBits = fracBits;
+
+        _controlBase = controlBase;
+        _controlMin = controlMin;
+        _controlMax = controlMax;
+
+        _kpFixed = ToFixed(kp);
+        _kiFixed = ToFixed(ki);
+        _kdFixed = ToFixed(kd);
     }
 
-    private static long ToFixed(double value)
-    {
-        double scale = 1L << FracBits;
+    public long KpFixed => _kpFixed;
+    public long KiFixed => _kiFixed;
+    public long KdFixed => _kdFixed;
 
-        return checked(
-            (long)Math.Round(
-                value * scale,
-                MidpointRounding.AwayFromZero));
+    public void Reset()
+    {
+        _integrator = BigInteger.Zero;
+        _previousError = 0;
+        _hasPreviousError = false;
     }
 
-    public TestResult Calculate(uint measured, uint target)
+    public TestResult Calculate(
+        uint measured,
+        uint target)
     {
-        // В Verilog:
+        // error = target - measured
         //
-        // error =
-        //   $signed({1'b0, target_count}) -
-        //   $signed({1'b0, measured_count});
-        //
-        // Диапазон помещается в Int64.
+        // В Verilog это signed 33 bit.
         long error = (long)target - measured;
 
-        // error: 33 bit
-        // coefficient: signed 32 bit
-        //
-        // В Verilog произведение имеет fixed-point масштаб 2^FracBits.
-        BigInteger pMult = (BigInteger)error * _kpFixed;
-        BigInteger iMult = (BigInteger)error * _kiFixed;
+        // P = error * Kp
+        BigInteger pMult =
+            (BigInteger)error * _kpFixed;
 
-        // Интегратор хранится ДО удаления дробных битов.
+        // I[n] = I[n-1] + error * Ki
+        BigInteger iMult =
+            (BigInteger)error * _kiFixed;
+
         _integrator += iMult;
 
-        // При необходимости сюда можно добавить те же I_MIN/I_MAX,
-        // что используются в Verilog.
-        //
-        // _integrator = Clamp(_integrator, iMin, iMax);
+        // D = Kd * (error[n] - error[n-1])
+        long deltaError;
 
+        if (_hasPreviousError)
+        {
+            deltaError =
+                error - _previousError;
+        }
+        else
+        {
+            // На первом измерении D = 0
+            deltaError = 0;
+        }
+
+        BigInteger dMult =
+            (BigInteger)deltaError * _kdFixed;
+
+        // P + I + D.
+        //
+        // Все значения пока находятся в fixed-point
+        // масштабе 2^FracBits.
         BigInteger correctionFixed =
-            pMult + _integrator;
+            pMult +
+            _integrator +
+            dMult;
 
-        // Аналог арифметического >>> FRAC_BITS.
-        //
-        // BigInteger >> для отрицательных чисел выполняет
-        // арифметический сдвиг.
+        // Убираем дробную часть.
         BigInteger correction =
-            correctionFixed >> FracBits;
+            correctionFixed >> _fracBits;
 
+        // Добавляем поправку к рабочей точке.
         BigInteger control =
-            (BigInteger)ControlBase + correction;
+            (BigInteger)_controlBase +
+            correction;
 
-        if (control < ControlMin)
-            control = ControlMin;
-        else if (control > ControlMax)
-            control = ControlMax;
+        // Saturation выхода.
+        if (control < _controlMin)
+            control = _controlMin;
+        else if (control > _controlMax)
+            control = _controlMax;
+
+        _previousError = error;
+        _hasPreviousError = true;
 
         return new TestResult(
             measured,
@@ -91,25 +126,54 @@ public class Generator
             error);
     }
 
+    public void GenerateFile(
+        string fileName,
+        uint target,
+        int count,
+        int initialOffset,
+        int randomSeed = 12345)
+    {
+        Reset();
+
+        var measuredValues = GenerateMeasurements(
+            target,
+            count,
+            initialOffset,
+            randomSeed);
+
+        using var writer =
+            new StreamWriter(fileName);
+
+        foreach (uint measured in measuredValues)
+        {
+            TestResult result =
+                Calculate(measured, target);
+
+            // measured target expected_control expected_error
+            writer.WriteLine(
+                $"{result.Measured} " +
+                $"{result.Target} " +
+                $"{result.Control} " +
+                $"{result.Error}");
+        }
+    }
+
     public IEnumerable<uint> GenerateMeasurements(
         uint target,
         int count,
-        int initialOffset)
+        int initialOffset,
+        int randomSeed = 12345)
     {
-        var random = new Random(12345);
+        var random = new Random(randomSeed);
 
         for (int i = 0; i < count; i++)
         {
-            // Имитируем постепенно изменяющуюся ошибку генератора.
-            //
-            // В начале генератор примерно на initialOffset тактов
-            // быстрее требуемого значения.
             double drift =
                 initialOffset *
                 Math.Exp(-i / 100.0);
 
-            // Квантование/шум измерения примерно +/- 2 такта.
-            int noise = random.Next(-2, 3);
+            int noise =
+                random.Next(-2, 3);
 
             long measured =
                 (long)target +
@@ -118,16 +182,28 @@ public class Generator
 
             measured = Math.Clamp(
                 measured,
-                uint.MinValue,
-                uint.MaxValue);
+                (long)uint.MinValue,
+                (long)uint.MaxValue);
 
             yield return (uint)measured;
         }
     }
+
+    private long ToFixed(double value)
+    {
+        double scale =
+            Math.Pow(2.0, _fracBits);
+
+        return checked(
+            (long)Math.Round(
+                value * scale,
+                MidpointRounding.AwayFromZero));
+    }
+
     public readonly record struct TestResult(
         uint Measured,
         uint Target,
         uint Control,
         long Error);
-
 }
+

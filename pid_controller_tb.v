@@ -233,13 +233,13 @@ module pid_controller_tb (
         $dumpvars(0, pid_controller_tb);
 
         reset_dut();
-        run_test_file("pid_test_data1.csv");
+        run_test_file("test_data/pid_test_data1.csv");
 
         reset_dut();
-        run_test_file("pid_test_data2.csv");
+        run_test_file("test_data/pid_test_data2.csv");
 
         reset_dut();
-        run_test_file("pid_test_data3.csv");
+        run_test_file("test_data/pid_test_data3.csv");
 
         $display("All tests completed");
         $finish;
