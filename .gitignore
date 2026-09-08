@@ -1,0 +1,67 @@
+# Icarus Verilog / vvp build artifacts
+out
+*.out
+*.vvp
+
+# Waveform dumps
+*.vcd
+*.fst
+*.lxt
+*.lxt2
+
+# Tool logs and temporary files
+*.log
+*.tmp
+*.bak
+
+# Editor / OS noise
+.vscode/
+.idea/
+*.swp
+*~
+Thumbs.db
+Desktop.ini
+
+
+#VS
+
+## Результирующие папки компиляции (Build outputs)
+[Dd]ebug/
+[Dd]ebugPublic/
+[Rr]elease/
+[Re]leases/
+x64/
+x86/
+build/
+bin/
+obj/
+
+## Папка настроек Visual Studio и кэш (IDE config and cache)
+.vs/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+## Инструменты тестирования и отчеты (Test results)
+GeneratedReports/
+TestResults/
+*.trx
+*.coverage
+
+## Пакеты и зависимости (Packages)
+*.nuget.exe
+nupkg/
+# Если используете старый формат packages.config, раскомментируйте строку ниже:
+# packages/
+
+## Локальные настройки и секреты (User-specific files / Secrets)
+*.userprefs
+appsettings.Development.json
+*.secrets.json
+
+## Логи и временные файлы
+*.log
+*.tmp
+
+

@@ -1,0 +1,7 @@
+kp ki kd
+0.0 0.0 1.0
+measured target expected_control expected_error
+100 100 1000 0
+90  100 1010 10
+80  100 1010 20
+110 100 970 -10

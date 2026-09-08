@@ -1,0 +1,8 @@
+{
+  "profiles": {
+    "TestDataGenerator": {
+      "commandName": "Project",
+      "commandLineArgs": "pid_test_data2.csv"
+    }
+  }
+}
